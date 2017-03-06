@@ -608,18 +608,6 @@ promotePawn b wp p =
           record b { blackSide = promotePawn₁ bs wp p }
       }
 
-pawnMoved₁ : WhichPawn → List (WhichPawn × Bool) → Bool
-pawnMoved₁ wp [] = false
-pawnMoved₁ wp ((wp₁ , b) ∷ cs) with whichPawnEq wp wp₁
-...| true = b
-...| false = pawnMoved₁ wp cs
-
-pawnMoved : BoardArrangement → WhichPawn → Bool
-pawnMoved b wp =
-  case whosTurn b of
-  λ{ white → pawnMoved₁ wp (pawnHasMoved (whiteSide b))
-   ; black → pawnMoved₁ wp (pawnHasMoved (blackSide b))
-   }
    
 markPawn₁ : WhichPawn → List (WhichPawn × Bool) → List (WhichPawn × Bool)
 markPawn₁ wp [] = []
@@ -682,57 +670,6 @@ markRookMoved w b =
            record b {blackSide = record bs { krMoved = true }}
       }
   
-data IsPromoted : WhichPawn → Piece → WhichPawn × Maybe Piece → Set where
-  isPromoted : ∀{wp p entry}
-    → wp ≡ proj₁ entry
-    → just p ≡ proj₂ entry
-    → IsPromoted wp p entry
-    
-data Promoted : BoardArrangement → WhichPawn → Piece → Set where
-  isPromW : ∀{b wp p}
-    → whosTurn b ≡ white
-    → Any (IsPromoted wp p) (pawnPromotes (whiteSide b))
-    → Promoted b wp p
-    
-  isPromB : ∀{b wp p}
-    → whosTurn b ≡ black
-    → Any (IsPromoted wp p) (pawnPromotes (blackSide b))
-    → Promoted b wp p
-
-data IsNotProm : WhichPawn → WhichPawn × Maybe Piece → Set where
-  isNotProm : ∀{wp entry}
-    → wp ≡ proj₁ entry
-    → nothing ≡ proj₂ entry
-    → IsNotProm wp entry
-
-data NotPromoted : BoardArrangement → WhichPawn → Set where
-  isNotPromotedW : ∀{b wp}
-    → whosTurn b ≡ white
-    → Any (IsNotProm wp) (pawnPromotes (whiteSide b))
-    → NotPromoted b wp
-
-  isNotPromotedB : ∀{b wp}
-    → whosTurn b ≡ black
-    → Any (IsNotProm wp) (pawnPromotes (blackSide b))
-    → NotPromoted b wp
-
--- the movement of pawns
-
-oneSquareForward : BoardArrangement → Square → Square → Bool
-oneSquareForward b s sq =
-  case whosTurn b of
-  λ{ white → sameFile s sq ∧ oneRankHigher s sq
-   ; black → sameFile s sq ∧ oneRankLower s sq
-   }
-
-isCaptureMove : BoardArrangement → Square → Square → Bool
-isCaptureMove b s sq =
-  case whosTurn b of
-  λ{ white → northeast s sq ∨ northwest s sq
-   ; black → southeast s sq ∨ southwest s sq
-   }
-
-
 -- | the occupation of little bits of land
 
 data Occupied : BoardArrangement → Square → Set where
@@ -794,6 +731,71 @@ data NotOccupiedLCastle : BoardArrangement → Set where
     → ¬ Occupied b (D , #8)
     → NotOccupiedLCastle b
 
+-- | pawns and their complicatedness
+
+data IsPromoted : WhichPawn → Piece → WhichPawn × Maybe Piece → Set where
+  isPromoted : ∀{wp p entry}
+    → wp ≡ proj₁ entry
+    → just p ≡ proj₂ entry
+    → IsPromoted wp p entry
+    
+data Promoted : BoardArrangement → WhichPawn → Piece → Set where
+  isPromW : ∀{b wp p}
+    → whosTurn b ≡ white
+    → Any (IsPromoted wp p) (pawnPromotes (whiteSide b))
+    → Promoted b wp p
+    
+  isPromB : ∀{b wp p}
+    → whosTurn b ≡ black
+    → Any (IsPromoted wp p) (pawnPromotes (blackSide b))
+    → Promoted b wp p
+
+data IsNotProm : WhichPawn → WhichPawn × Maybe Piece → Set where
+  isNotProm : ∀{wp entry}
+    → wp ≡ proj₁ entry
+    → nothing ≡ proj₂ entry
+    → IsNotProm wp entry
+
+data NotPromoted : BoardArrangement → WhichPawn → Set where
+  isNotPromotedW : ∀{b wp}
+    → whosTurn b ≡ white
+    → Any (IsNotProm wp) (pawnPromotes (whiteSide b))
+    → NotPromoted b wp
+
+  isNotPromotedB : ∀{b wp}
+    → whosTurn b ≡ black
+    → Any (IsNotProm wp) (pawnPromotes (blackSide b))
+    → NotPromoted b wp
+
+-- the movement of pawns
+
+oneSquareForward : BoardArrangement → Square → Square → Bool
+oneSquareForward b s sq =
+  case whosTurn b of
+  λ{ white → sameFile s sq ∧ oneRankHigher s sq
+   ; black → sameFile s sq ∧ oneRankLower s sq
+   }
+
+isCaptureMove : BoardArrangement → Square → Square → Bool
+isCaptureMove b s sq =
+  case whosTurn b of
+  λ{ white → northeast s sq ∨ northwest s sq
+   ; black → southeast s sq ∨ southwest s sq
+   }
+
+pawnMoved₁ : WhichPawn → List (WhichPawn × Bool) → Bool
+pawnMoved₁ wp [] = false
+pawnMoved₁ wp ((wp₁ , b) ∷ cs) with whichPawnEq wp wp₁
+...| true = b
+...| false = pawnMoved₁ wp cs
+
+pawnMoved : BoardArrangement → WhichPawn → Bool
+pawnMoved b wp =
+  case whosTurn b of
+  λ{ white → pawnMoved₁ wp (pawnHasMoved (whiteSide b))
+   ; black → pawnMoved₁ wp (pawnHasMoved (blackSide b))
+   }
+
 -- sq is start, sq₁ is dest, sq₂ is opponent pawn
 data IsEnPassantMove : BoardArrangement → Square → Square → Square → Set where
   isEnPassantMoveW : ∀{whichp b sq sq₁ sq₂}
@@ -809,6 +811,21 @@ data IsEnPassantMove : BoardArrangement → Square → Square → Square → Set
     → T (fileEq (proj₁ sq₁) (proj₁ sq₂))
     → T (oneRankLower sq₁ sq₂)
     → IsEnPassantMove b sq sq₁ sq₂
+
+data IsDoubleStep : BoardArrangement → Square → Square → Square → Set where
+  doubleStepW : ∀ {b sq sq₁ sq₂}
+    → T (sameFile sq₂ sq)
+    → T (sameFile sq₂ sq₁)
+    → T (oneRankHigher sq₂ sq)
+    → T (oneRankHigher sq₁ sq₂)
+    → IsDoubleStep b sq sq₁ sq₂
+
+  doubleStepB : ∀{b sq sq₁ sq₂}
+    → T (sameFile sq₂ sq)
+    → T (sameFile sq₂ sq₁)
+    → T (oneRankLower sq₂ sq)
+    → T (oneRankLower sq₁ sq₂)
+    → IsDoubleStep b sq sq₁ sq₂
 
 -- | kings and their being in check
 
@@ -897,10 +914,6 @@ data Move : Set where
 -- | The Moves
 
 -- the second board is the result of the move on the first board 
--- or at least that was the intention
--- according to the Game type b is the next board and b₁ is the
--- old board. I don't understand why the Game type doesn't behave
--- intuitively
 data IsMove : Move → BoardArrangement → BoardArrangement → Set where
   mvKing : ∀{m b₁ sq sq₁}
     → (K sq₁) ≡ m
@@ -1076,8 +1089,21 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → ¬ Occupied b sq₁
     → b₁ ≡ movePawn b whichp sq₁
     → ¬ Check b₁
-    → IsMove m b₁ b
+    → IsMove m b b₁
 
+  doubleStep : ∀{b₁ sq m sq₁ sq₂ whichp}
+    → (P whichp sq₁) ≡ m
+    → (b : BoardArrangement)
+    → ¬ Check b
+    → OccupiedWith b (pawn whichp) sq
+    → ¬ T (pawnMoved b whichp)
+    → IsDoubleStep b sq sq₁ sq₂
+    → ¬ Occupied b sq₁
+    → ¬ Occupied b sq₂
+    → b₁ ≡ movePawn b whichp sq₁
+    → ¬ Check b₁
+    → IsMove m b b₁
+    
   capPawn : ∀{b₁ sq m sq₁ whichp}
     → (Px whichp sq₁) ≡ m
     → (b : BoardArrangement)
@@ -1193,7 +1219,7 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
 
 data Game : List Move → BoardArrangement → Set where
   gameEnd : ∀{b} → Game [] b
-  game : ∀{m ms b b₁} → IsMove m b₁ b → Game ms b₁ → Game (m ∷ ms) b
+  game : ∀{m ms b b₁} → IsMove m b b₁ → Game ms b₁ → Game (m ∷ ms) b
 
 initialBoard : BoardArrangement
 initialBoard =
@@ -1317,5 +1343,13 @@ notCheckMoveP4 (check (occWith refl) (canAttackPawn {p8} (occWithOpponentPiece r
 ca : Game (P p4 (D , #3)
           ∷ [])
           initialBoard
-ca = game (mvPawn refl initialBoard (notCheckInitialBoard) (occWith refl) (isNotPromotedW refl (Any.there
+ca = game (mvPawn refl initialBoard notCheckInitialBoard (occWith refl) (isNotPromotedW refl (Any.there
                                                                                                   (Any.there (Any.there (Any.here (isNotProm refl refl)))))) tt notOccD3 refl notCheckMoveP4) gameEnd
+
+board2 = movePawn initialBoard p3 (C , #4)
+
+cc : Game ( P p4 (D , #3)
+          ∷ P p3 (C , #5)
+          ∷ [])
+          initialBoard
+cc = game {!!} (game {!!} gameEnd)
