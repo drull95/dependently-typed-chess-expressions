@@ -24,6 +24,7 @@ _𝔹=_ true true = true
 _𝔹=_ false false = true
 _𝔹=_ _     _     = false
 
+-- indexing list with a eq function
 !! : {A B : Set} → (A → A → Bool) → List (A × B) → A → Maybe B
 !! _ [] p = nothing
 !! eq ((a , b) ∷ as) p with eq a p
@@ -79,6 +80,9 @@ data Rank : Set where
   #8 : Rank
 
 Square = File × Rank
+
+-- the king cannot castle if it passes through a square that would
+-- put it in check
 
 fileEq : File → File → Bool
 fileEq A A = true
@@ -160,6 +164,8 @@ isValid : ℕ × ℕ → Bool
 isValid (a , b) =
   a > 0 ∧ a < 9 ∧ b > 0 ∧ b < 9
   
+-- enumerating the squares around a square. used for checking if the
+-- king is in checkmate
 sqsAround : Square → List Square
 sqsAround (a' , b') =
   let a = fileToℕ a'
@@ -169,88 +175,168 @@ sqsAround (a' , b') =
          (filter isValid sqs)
 
 -- | is this square relative to that one or that one to this?
+-- | how many columns or rows away is a square
 
-data OneFileHigher : Square → Square → Set where
-  oneFileHigher : ∀{s q}
-    → (file s ∸ file q) ≡ 1
-    → OneFileHigher s q
+columnsAway : Square → Square → ℕ
+columnsAway (a , _) (b , _) =
+  let a' = fileToℕ a
+      b' = fileToℕ b
+  in if a' > b' then a' ∸ b'
+                else b' ∸ a'
+                 
+aa = columnsAway (A , #1) (B , #1) 
+ab = columnsAway (A , #1) (A , #1)
+ac = columnsAway (A , #1) (H , #1)
+
+rowsAway : Square → Square → ℕ
+rowsAway (_ , a') (_ , b') =
+  let a = rankToℕ a'
+      b = rankToℕ b'
+  in if a > b then a ∸ b
+           else b ∸ a
+
+-- | helpers for enumerating squares *between* squares
+
+enumBetweenℕ₁ : ℕ → ℕ → List ℕ
+enumBetweenℕ₁ a zero    = []
+enumBetweenℕ₁ a (suc b) =
+   if a == b then []
+   else b ∷ enumBetweenℕ₁ a b
+
+enumBetweenℕ : ℕ → ℕ → List ℕ
+enumBetweenℕ a b =
+  if a > b
+  then enumBetweenℕ₁ b a
+  else enumBetweenℕ₁ a b
+
+bc : enumBetweenℕ 4 8 ≡ (7 ∷ 6 ∷ 5 ∷ [])
+bc = refl
+be = enumBetweenℕ 8 4
+bd = enumBetweenℕ  1 4
+bf = enumBetweenℕ 4 1
+
+enumBetweenRanks : Rank → Rank → List Rank
+enumBetweenRanks a b =
+  let a' = rankToℕ a
+      b' = rankToℕ b
+  in map ℕtoRank (enumBetweenℕ a' b')
+
+enumBetweenFiles : File → File → List File
+enumBetweenFiles a b =
+  let a' = fileToℕ a
+      b' = fileToℕ b
+  in map ℕtoFile (enumBetweenℕ a' b')
+
+-- | is it straight, diagonal or horsey
+
+isStraight : Square → Square → Bool
+isStraight (a , b) (c , d) = fileEq a c ∨ rankEq b d
+
+isDiagonal : Square → Square → Bool
+isDiagonal a b =
+  (columnsAway a b > 0 ∧ rowsAway a b > 0) ∧
+  (columnsAway a b == rowsAway a b)
+
+isHorseyMove : Square → Square → Bool
+isHorseyMove a b = 
+  (columnsAway a b == 2 ∧ rowsAway a b == 1) ∨
+  (columnsAway a b == 1 ∧ rowsAway a b == 2)
+
+oneSquareAway : Square → Square → Bool
+oneSquareAway a b = 
+  (columnsAway a b == 1 ∧ rowsAway a b == 0) ∨
+  (columnsAway a b == 0 ∧ rowsAway a b == 1) ∨
+  (columnsAway a b == 1 ∧ rowsAway a b == 1)
+
+enumStraight : (sq sq₁ : Square) → T (isStraight sq sq₁) → List Square
+enumStraight (a , b) (c , d) _ =
+  if fileEq a c -- we're in a column
+  then map (a ,_) (enumBetweenRanks b d)
+  else map (_, b) (enumBetweenFiles a c)
+
+-- | "unit tests" for enumSquaresStraight
+
+ba : List Square
+ba = enumStraight (A , #4) (A , #8) tt
+
+bb : List Square
+bb = enumStraight (A , #4) (A , #1) tt 
+
+bg : List Square
+bg = enumStraight (A , #5) (D , #5) tt
+
+-- | enumerating squares diagonally
+
+enumDiagonal : (sq sq₁ : Square) → T (isDiagonal sq sq₁) → List Square
+enumDiagonal (a , b) (c , d) _ = 
+  let rs = enumBetweenRanks b d
+      fs = enumBetweenFiles a c
+  in zip fs rs
+
+oneFileHigher : Square → Square → Bool
+oneFileHigher s q = (file s ∸ file q) == 1
+
+oneFileLower : Square → Square → Bool
+oneFileLower s q = (file q ∸ file s) == 1
     
-data OneFileLower : Square → Square → Set where
-  oneFileLower : ∀{s q}
-    → (file q ∸ file s) ≡ 1
-    → OneFileLower s q
+oneRankHigher : Square → Square → Bool
+oneRankHigher s q = (rank s ∸ rank q) == 1
+
+oneRankLower : Square → Square → Bool
+oneRankLower s q = (rank q ∸ rank s) == 1
+
+sameFile : Square → Square → Bool
+sameFile (a , b) (c , d) = fileEq a c
+
+sameRank : Square → Square → Bool
+sameRank (a , b) (c , d) = rankEq b d
+
+twoFilesLower : Square → Square → Bool
+twoFilesLower s q = (file q ∸ file s) == 2
+
+twoFilesHigher : Square → Square → Bool
+twoFilesHigher s q = (file s ∸ file q) == 2
+
+twoRanksLower : Square → Square → Bool
+twoRanksLower s q = (rank q ∸ rank s) == 2
+
+twoRanksHigher : Square → Square → Bool
+twoRanksHigher s q = (rank s ∸ rank q) == 2
+
+north : Square → Square → Bool
+north s q = sameFile s q ∧ oneRankHigher s q
+
+east : Square → Square → Bool
+east s q = sameRank s q ∧ oneFileHigher s q
+
+south : Square → Square → Bool
+south s q = sameFile s q ∧ oneRankLower s q
+
+west : Square → Square → Bool
+west s q = sameRank s q ∧ oneFileLower s q
+
+northeast : Square → Square → Bool
+northeast s q = oneFileHigher s q ∧ oneRankHigher s q
+
+northwest : Square → Square → Bool
+northwest s q = oneFileLower s q ∧ oneRankHigher s q
+
+southeast : Square → Square → Bool
+southeast s q = oneFileHigher s q ∧ oneRankLower s q
+
+southwest : Square → Square → Bool
+southwest s q = oneFileLower s q ∧ oneRankLower s q
+
+atTopOrBottom : Square → Bool
+atTopOrBottom (_ , #1) = true
+atTopOrBottom (_ , #8) = true
+atTopOrBottom _ = false
+
+-- | is a square relative to another or is that one relative to this one?
     
-data OneRankHigher : Square → Square → Set where
-  oneRankHigher : ∀{s q}
-    → (rank s ∸ rank q) ≡ 1
-    → OneRankHigher s q
-
-data OneRankLower : Square → Square → Set where
-  oneRankLower : ∀{s q}
-    → (rank q ∸ rank s) ≡ 1
-    → OneRankLower s q
-
-data SameFile : Square → Square → Set where
-  sameFile : ∀{s q}
-    → file s ≡ file q
-    → SameFile s q
-
-data SameRank : Square → Square → Set where
-  sameRank : ∀{s q}
-    → T (rank s > 0 ∧ rank s < 9)
-    → rank s ≡ rank q
-    → SameRank s q
-
-data North : Square → Square → Set where
-  mKNorth : ∀{s q}
-    → SameFile s q
-    → OneRankHigher s q
-    → North s q
-
-data East : Square → Square → Set where
-  mkEast : ∀{s q}
-    → SameRank s q
-    → OneFileHigher s q
-    → East s q
-
-data South : Square → Square → Set where
-  mkSouth : ∀{s q}
-    → SameFile s q
-    → OneRankLower s q
-    → South s q
-
-data West : Square → Square → Set where
-  mkWest : ∀{s q}
-    → SameRank s q
-    → OneFileLower s q
-    → West s q
-
-data NorthEast : Square → Square → Set where
-  mkNorthEast : ∀{s q}
-    → OneFileHigher s q
-    → OneRankHigher s q
-    → NorthEast s q
-
-data NorthWest : Square → Square → Set where
-  mkNorthWest : ∀{s q}
-    → OneRankHigher s q
-    → OneFileLower s q
-    → NorthWest s q
-
-data SouthEast : Square → Square → Set where
-  mkSouthEast : ∀{s q}
-    → OneRankLower s q
-    → OneFileHigher s q
-    → SouthEast s q
-
-data SouthWest : Square → Square → Set where
-  mkSouthWest : ∀{s q}
-    → OneFileLower s q
-    → OneRankLower s q
-    → SouthWest s q
-
 -- | Pieces
 
+-- king's rook or queens, kings knight or queens , etc
 data Which : Set where
   k : Which
   q : Which
@@ -303,10 +389,6 @@ whichPawnEq p7 p7 = true
 whichPawnEq p8 p8 = true
 whichPawnEq _  _  = false
 
--- | Moves
-
--- Move = Piece × Square
-  
 -- | Side, information about the pieces of each color
 
 record Side : Set where
@@ -330,8 +412,19 @@ record BoardArrangement : Set where
 
 open BoardArrangement
 
-turnColor : BoardArrangement → Color
-turnColor b = whosTurn b
+lcastlePassesThroughSquare : BoardArrangement → Square
+lcastlePassesThroughSquare b =
+  case whosTurn b of
+  λ{ white → (C , #1)
+   ; black → (C , #8)
+   }
+
+scastlePassesThroughSquare : BoardArrangement → Square
+scastlePassesThroughSquare b =
+  case whosTurn b of
+  λ{ white → (G , #1)
+   ; black → (G , #8)
+   }
 
 -- | all of the pieces
 allPieces : BoardArrangement → List (Piece × Maybe Square)
@@ -364,6 +457,21 @@ sqOfPiece b p =
                ; nothing → nothing
                }
    ; black → case !! pieceEq bps p of
+              λ{ (just sq) → sq
+               ; nothing → nothing
+               }
+   }
+
+sqOfOpponentPiece : BoardArrangement → Piece → Maybe Square
+sqOfOpponentPiece b p =
+  let wps = pieces (whiteSide b)
+      bps = pieces (blackSide b)
+  in case whosTurn b of
+  λ{ white → case !! pieceEq bps p of
+              λ{ (just sq) → sq
+               ; nothing → nothing
+               }
+   ; black → case !! pieceEq wps p of
               λ{ (just sq) → sq
                ; nothing → nothing
                }
@@ -510,31 +618,35 @@ pawnMoved b wp =
    ; black → pawnMoved₁ wp (pawnHasMoved (blackSide b))
    }
    
-data IsEnPassantMove : BoardArrangement → Square → Square → Set where
-  isEnPassantNE : ∀{b sq sq₁ t}
-    → whosTurn b ≡ white
-    → OneRankHigher t sq
-    → NorthEast sq₁ t
-    → IsEnPassantMove b sq sq₁
+markPawn₁ : WhichPawn → List (WhichPawn × Bool) → List (WhichPawn × Bool)
+markPawn₁ wp [] = []
+markPawn₁ wp ((wp₁ , b) ∷ cs) with whichPawnEq wp wp₁
+...| true = (wp , true) ∷ cs
+...| false = (wp₁ , b) ∷ markPawn₁ wp cs
 
-  isEnPassantNW : ∀{b sq sq₁ t}
-    → whosTurn b ≡ white
-    → OneRankHigher t sq
-    → NorthWest sq₁ t
-    → IsEnPassantMove b sq sq₁
+markPawnMoved : WhichPawn → BoardArrangement → BoardArrangement
+markPawnMoved wp b =
+  let ws = whiteSide b
+      bs = blackSide b
+  in case whosTurn b of
+     λ{ white →
+          record b { whiteSide =
+            record ws {
+              pawnHasMoved = markPawn₁ wp (pawnHasMoved ws)}}
+      ; black →
+          record b { blackSide =
+            record bs {
+              pawnHasMoved = markPawn₁ wp (pawnHasMoved bs)}}
+      }
 
-  isEnPassantSE : ∀{b sq sq₁ t}
-    → whosTurn b ≡ black
-    → OneRankLower t sq
-    → SouthEast sq₁ t
-    → IsEnPassantMove b sq sq₁
+movePawn : BoardArrangement → WhichPawn → Square → BoardArrangement
+movePawn b wp s =
+  markPawnMoved wp (mvPiece b (pawn wp) s)
 
-  isEnPassantSW : ∀{b sq sq₁ t}
-    → whosTurn b ≡ black
-    → OneRankLower t sq
-    → SouthWest sq₁ t
-    → IsEnPassantMove b sq sq₁
-  
+capturePawn : BoardArrangement → WhichPawn → Square → BoardArrangement
+capturePawn b wp s =
+  markPawnMoved wp (capturePiece b (pawn wp) s)
+
 markKingMoved : BoardArrangement → BoardArrangement 
 markKingMoved b =
   let ws = whiteSide b
@@ -559,11 +671,6 @@ markRookMoved w b =
            record b {blackSide = record bs { krMoved = true }}
       }
   
-atTopOrBottom : Square → Bool
-atTopOrBottom (_ , #1) = true
-atTopOrBottom (_ , #8) = true
-atTopOrBottom _ = false
-
 data IsPromoted : WhichPawn → Piece → WhichPawn × Maybe Piece → Set where
   isPromoted : ∀{wp p entry}
     → wp ≡ proj₁ entry
@@ -598,92 +705,47 @@ data NotPromoted : BoardArrangement → WhichPawn → Set where
     → Any (IsNotProm wp) (pawnPromotes (blackSide b))
     → NotPromoted b wp
 
--- | is a square relative to another or is that one relative to this one?
-    
-data OneSquareForward : Color → Square → Square → Set where
-  isOneSquareForwardW : ∀{c s q}
-    → c ≡ white
-    → North s q
-    → OneSquareForward c s q
+-- the movement of pawns
 
-  isOneSquareForwardB : ∀{c s q}
-    → c ≡ black
-    → South s q
-    → OneSquareForward c s q
+oneSquareForward : BoardArrangement → Square → Square → Bool
+oneSquareForward b s sq =
+  case whosTurn b of
+  λ{ white → sameFile s sq ∧ oneRankHigher s sq
+   ; black → sameFile s sq ∧ oneRankLower s sq
+   }
 
-data IsCaptureMove : Color → Square → Square → Set where
-  isCaptureMoveWNE : ∀{c s q}
-    → c ≡ white
-    → NorthEast s q
-    → IsCaptureMove c s q
+isCaptureMove : BoardArrangement → Square → Square → Bool
+isCaptureMove b s sq =
+  case whosTurn b of
+  λ{ white → northeast s sq ∨ northwest s sq
+   ; black → southeast s sq ∨ southwest s sq
+   }
 
-  isCaptureMoveWNW : ∀{c s q}
-    → c ≡ white
-    → NorthWest s q
-    → IsCaptureMove c s q
-
-  isCaptureMoveBSE : ∀{c s q}
-    → c ≡ black
-    → SouthEast s q
-    → IsCaptureMove c s q
-
-  isCaptureMoveBSW : ∀{c s q}
-    → c ≡ black
-    → SouthWest s q
-    → IsCaptureMove c s q
-
-data IsHorseyMove : Square → Square → Set where
-  isHorsey1 : ∀{s q t}
-    → OneRankLower t s
-    → SouthWest q t
-    → IsHorseyMove s q
-
-  isHorsey2 : ∀{s q t}
-    → OneRankLower t s
-    → SouthEast q t
-    → IsHorseyMove s q
-
-  isHorsey3 : ∀{s q t}
-    → OneRankHigher t s
-    → NorthWest q t
-    → IsHorseyMove s q
-
-  isHorsey4 : ∀{s q t}
-    → OneRankHigher t s
-    → NorthEast q t
-    → IsHorseyMove s q
-
-  isHorsey5 : ∀{s q t}
-    → OneFileLower t s
-    → SouthWest q t
-    → IsHorseyMove s q
-
-  isHorsey6 : ∀{s q t}
-    → OneFileLower t s
-    → NorthWest q t
-    → IsHorseyMove s q
-
-  isHorsey7 : ∀{s q t}
-    → OneFileHigher t s
-    → NorthEast q t
-    → IsHorseyMove s q
-
-  isHorsey8 : ∀{s q t}
-    → OneFileHigher t s
-    → SouthEast q t
-    → IsHorseyMove s q
+isEnPassantMove : BoardArrangement → Square → Square → Square → Bool
+isEnPassantMove b s sq =
+  case whosTurn b of
+  λ{ white → (twoRanksHigher s sq ∧ oneFileLower s sq) ∨
+             (twoRanksHigher s sq ∧ oneFileHigher s sq) 
+   ; black → (twoRanksLower s sq ∧ oneFileLower s sq) ∨
+             (twoRanksLower s sq ∧ oneFileHigher s sq)
+   }
 
 -- | the occupation of little bits of land
 
 data Occupied : BoardArrangement → Square → Set where
   occupied : ∀{sq b}
-    → (just sq) ∈ sqsOfAllPieces b → Occupied b sq
+    → just sq ∈ sqsOfAllPieces b → Occupied b sq
 
 data OccupiedWith : BoardArrangement → Piece → Square → Set where
   occWith : ∀{b p sq}
     → just sq ≡ sqOfPiece b p
     → OccupiedWith b p sq
 
+data OccupiedWithOpponentPiece : BoardArrangement → Piece → Square → Set where
+  occWithOpponentPiece : ∀{b p sq}
+    → just sq ≡ sqOfOpponentPiece b p
+    → OccupiedWithOpponentPiece b p sq
+    
 data OccupiedByOpponent : BoardArrangement → Square → Set where
   occOpponent : ∀{b sq}
     → just sq ∈ sqsOfOpponentPieces b
@@ -694,200 +756,81 @@ data OccupiedByFriendly : BoardArrangement → Square → Set where
     → just sq ∈ sqsOfFriendlyPieces b
     → OccupiedByFriendly b sq
     
-data NotOccupied : BoardArrangement → Square → Set where
-  notOccupied : ∀{b sq}
-     → ¬ (just sq) ∈ sqsOfAllPieces b
-     → NotOccupied b sq
-
-data DiagonalDir : Set where
-  ne : DiagonalDir
-  nw : DiagonalDir
-  se : DiagonalDir
-  sw : DiagonalDir
-
--- be easier to just make a predicate but here goes
--- we want to enumerate the squares *between* two squares
-data NotOccupiedDiagonal : DiagonalDir → BoardArrangement → Square → Square → Set where
-  notOccDiagonalNE : ∀{b sq sq₁}
-    → NorthEast sq sq₁
-    → NotOccupied b sq
-    → NotOccupiedDiagonal ne b sq sq₁
-
-  notOccDiagonalNW : ∀{b sq sq₁}
-    → NorthWest sq sq₁
-    → NotOccupied b sq
-    → NotOccupiedDiagonal nw b sq sq₁
-
-  notOccDiagonalSE : ∀{b sq sq₁}
-    → SouthEast sq sq₁
-    → NotOccupied b sq
-    → NotOccupiedDiagonal se b sq sq₁
-
-  notOccDiagonalSW : ∀{b sq sq₁}
-    → SouthWest sq sq₁
-    → NotOccupied b sq
-    → NotOccupiedDiagonal sw b sq sq₁
-
-  continuesDiagonalNE : ∀{b sq sq₁ sq₂}
-    → NotOccupiedDiagonal ne b sq sq₁
-    → NorthEast sq₂ sq
-    → NotOccupied b sq₂
-    → NotOccupiedDiagonal ne b sq₂ sq₁
-
-  continuesDiagonalNW : ∀{b sq sq₁ sq₂}
-    → NotOccupiedDiagonal nw b sq sq₁
-    → NorthWest sq₂ sq
-    → NotOccupied b sq₁
-    → NotOccupiedDiagonal nw b sq₂ sq₁
-
-  continuesDiagonalSE : ∀{b sq sq₁ sq₂}
-    → NotOccupiedDiagonal se b sq sq₁
-    → SouthEast sq₂ sq
-    → NotOccupied b sq₂
-    → NotOccupiedDiagonal se b sq₂ sq₁
-
-  continuesDiagonalSW : ∀{b sq sq₁ sq₂}
-    → NotOccupiedDiagonal sw b sq sq₁
-    → SouthWest sq₂ sq
-    → NotOccupied b sq₂
-    → NotOccupiedDiagonal sw b sq₂ sq₁
-
-data StraightDir : Set where
-  north : StraightDir
-  east : StraightDir
-  south : StraightDir
-  west : StraightDir
-
--- as before i don't know that there is an advantage to doing this over
--- using a predicate. as before we are trying to get the squares *between*
--- two squares
-data NotOccupiedStraight : StraightDir → BoardArrangement → Square → Square → Set where
-  notOccupiedN : ∀{b sq sq₁}
-    → SameFile sq sq₁
-    → OneRankHigher sq sq₁
-    → NotOccupied b sq
-    → NotOccupiedStraight north b sq sq₁
-
-  notOccupiedE : ∀{b sq sq₁}
-    → SameRank sq sq₁
-    → OneFileHigher sq sq₁
-    → NotOccupied b sq
-    → NotOccupiedStraight east b sq sq₁
-
-  notOccupiedS : ∀{b sq sq₁}
-    → SameFile sq sq₁
-    → OneRankLower sq sq₁
-    → NotOccupied b sq
-    → NotOccupiedStraight south b sq sq₁
-
-  notOccupiedW : ∀{b sq sq₁}
-    → SameRank sq sq₁
-    → OneFileLower sq sq₁
-    → NotOccupied b sq
-    → NotOccupiedStraight west b sq sq₁
-
-  continuesStraightN : ∀{b sq sq₁ sq₂}
-    → NotOccupiedStraight north b sq sq₁
-    → SameFile sq₂ sq
-    → OneRankHigher sq₂ sq
-    → NotOccupied b sq₂
-    → NotOccupiedStraight north b sq₂ sq₁
-
-  continuesStraightW : ∀{b sq sq₁ sq₂}
-    → NotOccupiedStraight west b sq sq₁
-    → SameRank sq₂ sq
-    → OneFileLower sq₂ sq
-    → NotOccupied b sq₂
-    → NotOccupiedStraight west b sq₂ sq₁
-
-  continuesStraightS : ∀{b sq sq₁ sq₂}
-    → NotOccupiedStraight south b sq sq₁
-    → SameFile sq₂ sq
-    → OneRankLower sq₂ sq
-    → NotOccupied b sq₂
-    → NotOccupiedStraight south b sq₂ sq₁
-
-  continuesStraightE : ∀{b sq sq₁ sq₂} 
-    → NotOccupiedStraight east b sq sq₁
-    → SameRank sq₂ sq
-    → OneFileHigher sq₂ sq
-    → NotOccupied b sq₂
-    → NotOccupiedStraight east b sq₂ sq₁
+data NotOccupied : BoardArrangement → List Square → Set where
+  notOccEmpty : ∀{b} → NotOccupied b []
+  notOccStep : ∀{b sq sqs}
+    → ¬ Occupied b sq
+    → NotOccupied b sqs
+    → NotOccupied b (sq ∷ sqs)
 
 data NotOccupiedSCastle : BoardArrangement → Set where
   notOccSCastleW : ∀{b}
     → (whosTurn b ≡ white)
-    → NotOccupied b (G , #1)
-    → NotOccupied b (F , #1)
+    → ¬ Occupied b (G , #1)
+    → ¬ Occupied b (F , #1)
     → NotOccupiedSCastle b
 
   notOccSCastleB : ∀{b}
     → (whosTurn b ≡ black)
-    → NotOccupied b (G , #8)
-    → NotOccupied b (F , #8)
+    → ¬ Occupied b (G , #8)
+    → ¬ Occupied b (F , #8)
     → NotOccupiedSCastle b
 
 data NotOccupiedLCastle : BoardArrangement → Set where
   notOccLCastleW : ∀{b}
     → (whosTurn b ≡ white)
-    → NotOccupied b (B , #1)
-    → NotOccupied b (C , #1)
-    → NotOccupied b (D , #1)
+    → ¬ Occupied b (B , #1)
+    → ¬ Occupied b (C , #1)
+    → ¬ Occupied b (D , #1)
     → NotOccupiedLCastle b
 
   notOccLCastleB : ∀{b}
     → (whosTurn b ≡ black)
-    → NotOccupied b (B , #8)
-    → NotOccupied b (C , #8)
-    → NotOccupied b (D , #8)
+    → ¬ Occupied b (B , #8)
+    → ¬ Occupied b (C , #8)
+    → ¬ Occupied b (D , #8)
     → NotOccupiedLCastle b
 
-data OneSquareAway : Square → Square → Set where
-  oneSquareAwayN : ∀{s q} → North s q → OneSquareAway s q
-  oneSquareAwayE : ∀{s q} → East s q  → OneSquareAway s q
-  oneSquareAwayS : ∀{s q} → South s q → OneSquareAway s q
-  oneSquareAwayW : ∀{s q} → West s q → OneSquareAway s q
-  oneSquareAwayNE : ∀{s q} → NorthEast s q  → OneSquareAway s q
-  oneSquareAwayNW : ∀{s q} → NorthWest s q → OneSquareAway s q
-  oneSquareAwaySE : ∀{s q} → SouthEast s q → OneSquareAway s q
-  oneSquareAwaySW : ∀{s q} → SouthWest s q → OneSquareAway s q
-   
 -- | kings and their being in check
 
 data CanBeAttacked : BoardArrangement → Square → Set where
   canAttackKing : ∀{b sq ksq}
-    → OccupiedWith b king ksq
-    → OneSquareAway sq ksq
+    → OccupiedWithOpponentPiece b king ksq
+    → T (oneSquareAway sq ksq)
     → CanBeAttacked b sq
 
-  canAttackQueenStraight : ∀{b d sq qsq}
-    → OccupiedWith b queen qsq
-    → NotOccupiedStraight d b sq qsq
+  canAttackQueenStraight : ∀{b sq qsq}
+    → OccupiedWithOpponentPiece b queen qsq
+    → (p : T (isStraight sq qsq))
+    → NotOccupied b (enumStraight sq qsq p)
     → CanBeAttacked b sq
     
-  canAttackQueenDiagonal : ∀{b d sq qsq}
-    → OccupiedWith b queen qsq
-    → NotOccupiedStraight d b sq qsq
+  canAttackQueenDiagonal : ∀{b sq qsq}
+    → OccupiedWithOpponentPiece b queen qsq
+    → (p : T (isDiagonal sq qsq))
+    → NotOccupied b (enumDiagonal sq qsq p)
     → CanBeAttacked b sq
 
-  canAttackBishop : ∀{b d sq bsq whichb}
-    → OccupiedWith b (bishop whichb) bsq
-    → NotOccupiedDiagonal d b sq bsq
+  canAttackBishop : ∀{whichb b sq bsq }
+    → OccupiedWithOpponentPiece b (bishop whichb) bsq
+    → (p : T (isDiagonal sq bsq))
+    → NotOccupied b (enumDiagonal sq bsq p)
     → CanBeAttacked b sq
 
-  canAttackKnight : ∀{b sq ksq whichk}
-    → OccupiedWith b (knight whichk) ksq
-    → IsHorseyMove sq ksq
+  canAttackKnight : ∀{whichk b sq ksq}
+    → OccupiedWithOpponentPiece b (knight whichk) ksq
+    → T (isHorseyMove sq ksq)
     → CanBeAttacked b sq
 
-  canAttackRook : ∀{b d sq rsq whichr}
-    → OccupiedWith b (rook whichr) rsq
-    → NotOccupiedStraight d b sq rsq
+  canAttackRook : ∀{whichr b sq rsq}
+    → OccupiedWithOpponentPiece b (rook whichr) rsq
+    → (p : T (isStraight sq rsq))
+    → NotOccupied b (enumStraight sq rsq p)
     → CanBeAttacked b sq
 
-  canAttackPawn : ∀{b sq psq whichp}
-    → OccupiedWith b (pawn whichp) psq
-    → IsCaptureMove (turnColor b) sq psq
+  canAttackPawn : ∀{whichp b sq psq}
+    → OccupiedWithOpponentPiece b (pawn whichp) psq
+    → T (isCaptureMove b sq psq)
     → CanBeAttacked b sq
 
 data Check : BoardArrangement → Set where
@@ -912,24 +855,7 @@ data Checkmate : BoardArrangement → Set where
     → All (BadSquare b) (sqsAround sq)
     → Checkmate b
 
--- | The Moves
-
--- i'd like to have capture and movement in the same rule but i don't
--- know how to do it so specifying them separately will do
-
-lcastlePassesThroughSquare : BoardArrangement → Square
-lcastlePassesThroughSquare b =
-  case whosTurn b of
-  λ{ white → (C , #1)
-   ; black → (C , #8)
-   }
-
-scastlePassesThroughSquare : BoardArrangement → Square
-scastlePassesThroughSquare b =
-  case whosTurn b of
-  λ{ white → (G , #1)
-   ; black → (G , #8)
-   }
+-- pseudo algebraic notation for moves
 
 data Move : Set where
   0-0-0 : Move
@@ -949,14 +875,17 @@ data Move : Set where
   Nx : Which → Square → Move
   Px : WhichPawn → Square → Move
   
+-- | The Moves
+
+-- the second board is the result of the move on the first board 
 data IsMove : Move → BoardArrangement → BoardArrangement → Set where
   mvKing : ∀{m b₁ sq sq₁}
     → (K sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Checkmate b
     → OccupiedWith b king sq
-    → OneSquareAway sq sq₁
-    → NotOccupied b sq₁
+    → T (oneSquareAway sq sq₁)
+    → ¬ Occupied b sq₁
     → b₁ ≡ markKingMoved (mvPiece b king sq₁)
     → ¬ Check b₁
     → IsMove m b b₁
@@ -966,7 +895,7 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → (b : BoardArrangement)
     → ¬ Checkmate b
     → OccupiedWith b king sq
-    → OneSquareAway sq sq₁
+    → T (oneSquareAway sq sq₁)
     → OccupiedByOpponent b sq₁
     → b₁ ≡ capturePiece b king sq₁
     → ¬ Check b₁
@@ -996,67 +925,73 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → ¬ Check b₁
     → IsMove 0-0 b b₁
     
-  mvQueenStraight : ∀{b₁ d sq sq₁ m}
+  mvQueenStraight : ∀{b₁ sq sq₁ m}
     → (Q sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b queen sq
-    → NotOccupiedStraight d b sq sq₁
-    → NotOccupied b sq₁
+    → (p : T (isStraight sq sq₁))
+    → NotOccupied b (enumStraight sq sq₁ p)
+    → ¬ Occupied b sq₁
     → b₁ ≡ mvPiece b queen sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  capQueenStraight : ∀{b₁ d m sq sq₁}
+  capQueenStraight : ∀{b₁ m sq sq₁}
     → (Qx sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b queen sq
-    → NotOccupiedStraight d b sq sq₁
+    → (p : T (isStraight sq sq₁))
+    → NotOccupied b (enumStraight sq sq₁ p)
     → OccupiedByOpponent b sq₁
     → b₁ ≡ capturePiece b queen sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  mvQueenDiagonal : ∀{b₁ m d sq sq₁}
+  mvQueenDiagonal : ∀{b₁ m sq sq₁}
     → (Q sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b queen sq
-    → NotOccupiedDiagonal d b sq sq₁
-    → NotOccupied b sq₁
+    → (p : T (isDiagonal sq sq₁))
+    → NotOccupied b (enumDiagonal sq sq₁ p)
+    → ¬ Occupied b sq₁
     → b₁ ≡ mvPiece b queen sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  capQueenDiagonal : ∀{b₁ d m sq sq₁}
+  capQueenDiagonal : ∀{b₁ m sq sq₁}
     → (Qx sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b queen sq
-    → NotOccupiedDiagonal d b sq sq₁
+    → (p : T (isDiagonal sq sq₁))
+    → NotOccupied b (enumDiagonal sq sq₁ p) 
     → OccupiedByOpponent b sq₁
     → b₁ ≡ capturePiece b queen sq₁
     → ¬ Check b₁
     → IsMove m b b₁
     
-  mvBishop : ∀{b₁ d sq m whichb sq₁}
+  mvBishop : ∀{b₁ sq m whichb sq₁}
     → (B whichb sq) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (bishop whichb) sq
-    → NotOccupiedDiagonal d b sq sq₁
-    → NotOccupied b sq₁
+    → (p : T (isDiagonal sq sq₁))
+    → NotOccupied b (enumDiagonal sq sq₁ p)
+    → ¬ Occupied b sq₁
     → b₁ ≡ mvPiece b (bishop whichb) sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  capBishop : ∀{b₁ d sq m whichb sq₁}
+  capBishop : ∀{b₁ sq m whichb sq₁}
     → (Bx whichb sq) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (bishop whichb) sq
-    → NotOccupiedDiagonal d b sq sq₁
+    → (p : T (isDiagonal sq sq₁))
+    → NotOccupied b (enumDiagonal sq sq₁ p)
     → OccupiedByOpponent b sq₁
     → b₁ ≡ capturePiece b (bishop whichb) sq₁
     → ¬ Check b₁
@@ -1067,8 +1002,8 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (knight whichk) sq
-    → IsHorseyMove sq sq₁
-    → NotOccupied b sq₁
+    → T (isHorseyMove sq sq₁)
+    → ¬ Occupied b sq₁
     → b₁ ≡ mvPiece b (knight whichk) sq₁
     → ¬ Check b₁
     → IsMove m b b₁
@@ -1078,29 +1013,31 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (knight whichk) sq
-    → IsHorseyMove sq sq₁
+    → T (isHorseyMove sq sq₁)
     → OccupiedByOpponent b sq₁
     → b₁ ≡ capturePiece b (knight whichk) sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  mvRook : ∀{b₁ d sq m sq₁ whichr}
+  mvRook : ∀{b₁ sq m sq₁ whichr}
     → (R whichr sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (rook whichr) sq
-    → NotOccupiedStraight d b sq sq₁
-    → NotOccupied b sq₁
+    → (p : T (isStraight sq sq₁))
+    → NotOccupied b (enumStraight sq sq₁ p) 
+    → ¬ Occupied b sq₁
     → b₁ ≡ markRookMoved whichr (mvPiece b (rook whichr) sq₁)
     → ¬ Check b₁
     → IsMove m b b₁
 
-  capRook : ∀{b₁ d sq m sq₁ whichr}
+  capRook : ∀{b₁ sq m sq₁ whichr}
     → (Rx whichr sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (rook whichr) sq
-    → NotOccupiedStraight d b sq sq₁
+    → (p : T (isStraight sq sq₁))
+    → NotOccupied b (enumStraight sq sq₁ p) 
     → OccupiedByOpponent b sq₁
     → b₁ ≡ markRookMoved whichr (mvPiece b (rook whichr) sq₁)
     → ¬ Check b₁
@@ -1112,11 +1049,11 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → ¬ Check b
     → OccupiedWith b (pawn whichp) sq
     → NotPromoted b whichp
-    → OneSquareForward (turnColor b) sq sq₁
-    → NotOccupied b sq₁
-    → b₁ ≡ mvPiece b (pawn whichp) sq₁
+    → T (oneSquareForward b sq₁ sq)
+    → ¬ Occupied b sq₁
+    → b₁ ≡ movePawn b whichp sq₁
     → ¬ Check b₁
-    → IsMove m b b₁
+    → IsMove m b₁ b
 
   capPawn : ∀{b₁ sq m sq₁ whichp}
     → (Px whichp sq₁) ≡ m
@@ -1124,21 +1061,21 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → ¬ Check b
     → OccupiedWith b (pawn whichp) sq
     → NotPromoted b whichp
-    → IsCaptureMove (turnColor b) sq sq₁
+    → T (isCaptureMove b sq sq₁)
     → OccupiedByOpponent b sq₁
-    → b₁ ≡ capturePiece b (pawn whichp) sq₁
+    → b₁ ≡ capturePawn b whichp sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  enPassant : ∀{b₁ sq m sq₁ whichp}
+  enPassant : ∀{b₁ sq m sq₁ sq₂ whichp whichp₁}
     → (ep whichp sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → ¬ T (pawnMoved b whichp)
     → OccupiedWith b (pawn whichp) sq
-    → IsEnPassantMove b sq sq₁
-    → OccupiedByOpponent b sq₁
-    → b₁ ≡ capturePiece b (pawn whichp) sq₁
+    → T (isEnPassantMove b sq sq₁ sq₂)
+    → OccupiedWithOpponentPiece b (pawn whichp₁) sq₂
+    → b₁ ≡ capturePawn b whichp sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
@@ -1158,8 +1095,8 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → ¬ Check b
     → OccupiedWith b (pawn whichp) sq
     → Promoted b whichp (knight whichk)
-    → IsHorseyMove sq sq₁
-    → NotOccupied b sq₁
+    → T (isHorseyMove sq sq₁)
+    → ¬ Occupied b sq₁
     → b₁ ≡ mvPiece b (pawn whichp) sq₁
     → ¬ Check b₁
     → IsMove m b b₁
@@ -1170,55 +1107,59 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → ¬ Check b
     → OccupiedWith b (pawn whichp) sq
     → Promoted b whichp (knight whichk)
-    → IsHorseyMove sq sq₁
+    → T (isHorseyMove sq sq₁)
     → OccupiedByOpponent b sq₁
     → b₁ ≡ capturePiece b (pawn whichp) sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  mvPromotedQueenStraight : ∀{b₁ d sq whichp m sq₁}
+  mvPromotedQueenStraight : ∀{b₁ sq whichp m sq₁}
     → (P whichp sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b queen sq
     → Promoted b whichp queen
-    → NotOccupiedStraight d b sq sq₁
-    → NotOccupied b sq₁
+    → (p : T (isStraight sq sq₁))
+    → NotOccupied b (enumStraight sq sq₁ p)
+    → ¬ Occupied b sq₁
     → b₁ ≡ mvPiece b (pawn whichp) sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  capPromotedQueenStraight : ∀{b₁ d sq m whichp sq₁}
+  capPromotedQueenStraight : ∀{b₁ sq m whichp sq₁}
     → (Px whichp sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (pawn whichp) sq
     → Promoted b whichp queen
-    → NotOccupiedStraight d b sq sq₁
+    → (p : T (isStraight sq sq₁))
+    → NotOccupied b (enumStraight sq sq₁ p)
     → OccupiedByOpponent b sq₁
     → b₁ ≡ capturePiece b (pawn whichp) sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  mvPromotedQueenDiagonal : ∀{b₁ d sq m whichp sq₁}
+  mvPromotedQueenDiagonal : ∀{b₁ sq m whichp sq₁}
     → (P whichp sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (pawn whichp) sq
     → Promoted b whichp queen
-    → NotOccupiedDiagonal d b sq sq₁
-    → NotOccupied b sq₁
+    → (p : T (isDiagonal sq sq₁))
+    → NotOccupied b (enumDiagonal sq sq₁ p)
+    → ¬ Occupied b sq₁
     → b₁ ≡ mvPiece b (pawn whichp) sq₁
     → ¬ Check b₁
     → IsMove m b b₁
 
-  capPromotedQueenDiagonal : ∀{b₁ d sq whichp m sq₁}
+  capPromotedQueenDiagonal : ∀{b₁ sq whichp m sq₁}
     → (Px whichp sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → OccupiedWith b (pawn whichp) sq
     → Promoted b whichp queen
-    → NotOccupiedDiagonal d b sq sq₁
+    → (p : T (isDiagonal sq sq₁))
+    → NotOccupied b (enumDiagonal sq sq₁ p)
     → OccupiedByOpponent b sq₁
     → b₁ ≡ capturePiece b (pawn whichp) sq₁
     → ¬ Check b₁
@@ -1301,42 +1242,41 @@ initialBoard =
             ; blackSide = bs
             }
 
-notCheckInitialBoard : ¬ Check initialBoard
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwayN (mKNorth (sameFile x) (oneRankHigher ())))))
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith x) (oneSquareAwayE x₁))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith x) (oneSquareAwayS x₁))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith x) (oneSquareAwayW x₁))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith x) (oneSquareAwayNE x₁))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith x) (oneSquareAwayNW x₁))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith x) (oneSquareAwaySE x₁))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith x) (oneSquareAwaySW x₁))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackQueenStraight x₁ x₂)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackQueenDiagonal x₁ x₂)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackBishop x₁ x₂)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKnight x₁ x₂)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackRook x₁ x₂)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackPawn x₁ x₂)) = {!!}
+b1 : ∀{whichb} → bishop whichb ≡ bishop whichb
+b1 = refl
 
-aa : Game (P p4 (D , #3)
+-- holy cow it takes a lot to see that the initial board is not in check
+notCheckInitialBoard : ¬ Check initialBoard
+notCheckInitialBoard (check (occWith refl) (canAttackKing (occWithOpponentPiece refl) ()))
+notCheckInitialBoard (check (occWith refl) (canAttackQueenStraight (occWithOpponentPiece refl) p x₁)) = p
+notCheckInitialBoard (check (occWith refl) (canAttackQueenDiagonal (occWithOpponentPiece refl) p x₁)) = p
+notCheckInitialBoard (check (occWith refl) (canAttackBishop {k} (occWithOpponentPiece refl) p x₁)) = p
+notCheckInitialBoard (check (occWith refl) (canAttackBishop {q} (occWithOpponentPiece refl) p x₁)) = p
+notCheckInitialBoard (check (occWith refl) (canAttackKnight {k} (occWithOpponentPiece refl) ()))
+notCheckInitialBoard (check (occWith refl) (canAttackKnight {q} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckInitialBoard (check (occWith refl) (canAttackRook {k} (occWithOpponentPiece refl) p (notOccStep x x₁))) = p
+notCheckInitialBoard (check (occWith refl) (canAttackRook {q} (occWithOpponentPiece refl) p x₁)) = p
+notCheckInitialBoard (check (occWith refl) (canAttackPawn {p1} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckInitialBoard (check (occWith refl) (canAttackPawn {p2} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckInitialBoard (check (occWith refl) (canAttackPawn {p3} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckInitialBoard (check (occWith refl) (canAttackPawn {p4} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckInitialBoard (check (occWith refl) (canAttackPawn {p5} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckInitialBoard (check (occWith refl) (canAttackPawn {p6} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckInitialBoard (check (occWith refl) (canAttackPawn {p7} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckInitialBoard (check (occWith refl) (canAttackPawn {p8} (occWithOpponentPiece refl) x₁)) = x₁
+
+cb : Game [] initialBoard
+cb = gameBegin
+
+-- we have to go through 16*2 pieces
+notOccD3 : ¬ Occupied initialBoard (D , #3)
+notOccD3 (occupied (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next ())))))))))))))))))))))))))))))))))
+
+notCheckMoveP4 : ¬ Check (movePawn initialBoard p4 (D , #3))
+notCheckMoveP4 = {!!}
+
+ca : Game (P p4 (D , #3)
           ∷ [])
           initialBoard
-aa = game (mvPawn refl {!!} {!!} (occWith refl) (isNotPromotedW refl {!!}) {!!} {!!} {!!} {!!}) gameBegin
-
-{-
-notCheckInitialBoard : ¬ Check initialBoard
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwayN (mKNorth x x₁)))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwayE x))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwayS x))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwayW x))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwayNE x))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwayNW x))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwaySE x))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKing (occWith refl) (oneSquareAwaySW x))) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackQueenStraight x x₁)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackQueenDiagonal x x₁)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackBishop x x₁)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackKnight x x₁)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackRook x x₁)) = {!!}
-notCheckInitialBoard (check (occWith refl) (canAttackPawn x x₁)) = {!!}
-
--}
+ca = game (mvPawn refl initialBoard (notCheckInitialBoard) (occWith refl) (isNotPromotedW refl (Any.there
+                                                                                                  (Any.there (Any.there (Any.here (isNotProm refl refl)))))) tt notOccD3 refl notCheckMoveP4) gameBegin
