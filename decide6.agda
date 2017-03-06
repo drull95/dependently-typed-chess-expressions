@@ -494,7 +494,14 @@ sqsOfFriendlyPieces b =
    ; black → map sqOf (pieces (blackSide b))
    }
 
--- | altering pieces 
+-- | altering boards
+
+changeTurn : BoardArrangement → BoardArrangement
+changeTurn b =
+  case whosTurn b of
+  λ{ white → record b {whosTurn = black}
+   ; black → record b {whosTurn = white}
+   }
 
 updatePiece : List (Piece × Maybe Square) → Piece → Maybe Square → List (Piece × Maybe Square)
 updatePiece [] p sq = []
@@ -510,12 +517,12 @@ mvPiece b p sq =
   let wps = pieces (whiteSide b)
       bps = pieces (blackSide b)
   in case whosTurn b of
-     λ{ white → record b {
+     λ{ white → changeTurn (record b {
          whiteSide =
-           updateSide (whiteSide b) (updatePiece wps p (just sq)) }
-      ; black → record b {
+           updateSide (whiteSide b) (updatePiece wps p (just sq)) })
+      ; black → changeTurn (record b {
           blackSide =
-            updateSide (blackSide b) (updatePiece bps p (just sq)) }
+            updateSide (blackSide b) (updatePiece bps p (just sq)) })
       }
    
 removePiece : BoardArrangement → Piece → BoardArrangement
@@ -554,8 +561,8 @@ capturePiece : BoardArrangement → Piece → Square → BoardArrangement
 capturePiece b p sq =
   let b' = mvPiece b p sq
   in case whoHasSquare b sq of
-     λ{ (just p) → removePiece b' p
-      ; nothing → b'
+     λ{ (just p) → changeTurn (removePiece b' p)
+      ; nothing → changeTurn b'
       }
 
 -- | short and long castles
@@ -603,9 +610,9 @@ promotePawn b wp p =
       bs = blackSide b
   in case whosTurn b of
      λ{ white → 
-          record b { whiteSide = promotePawn₁ ws wp p }
+          changeTurn (record b { whiteSide = promotePawn₁ ws wp p })
       ; black →
-          record b { blackSide = promotePawn₁ bs wp p }
+          changeTurn (record b { blackSide = promotePawn₁ bs wp p })
       }
 
    
@@ -641,9 +648,9 @@ capturePawn b wp s =
 doEnPassant : BoardArrangement → WhichPawn → Square → Square → BoardArrangement
 doEnPassant b wp sq sq₁ = 
   let b' = mvPiece b (pawn wp) sq
-  in case whoHasSquare b sq₁ of -- cheating
-     λ{ (just (pawn p)) → removePiece b' (pawn p)
-      ; _ → b'
+  in case whoHasSquare b sq₁ of
+     λ{ (just (pawn p)) → changeTurn (removePiece b' (pawn p))
+      ; _ → changeTurn b' -- cheating. dunno how to not maybe
       }
 
 markKingMoved : BoardArrangement → BoardArrangement 
@@ -812,20 +819,21 @@ data IsEnPassantMove : BoardArrangement → Square → Square → Square → Set
     → T (oneRankLower sq₁ sq₂)
     → IsEnPassantMove b sq sq₁ sq₂
 
-data IsDoubleStep : BoardArrangement → Square → Square → Square → Set where
-  doubleStepW : ∀ {b sq sq₁ sq₂}
-    → T (sameFile sq₂ sq)
-    → T (sameFile sq₂ sq₁)
-    → T (oneRankHigher sq₂ sq)
-    → T (oneRankHigher sq₁ sq₂)
-    → IsDoubleStep b sq sq₁ sq₂
+twoSteps : BoardArrangement → Square → Square
+twoSteps b (c , d) =
+  case whosTurn b of
+  λ{ white → (c , ℕtoRank ((rankToℕ d) + 2))
+   ; black → (c , ℕtoRank ((rankToℕ d) ∸ 2))
+   }
 
-  doubleStepB : ∀{b sq sq₁ sq₂}
-    → T (sameFile sq₂ sq)
-    → T (sameFile sq₂ sq₁)
-    → T (oneRankLower sq₂ sq)
-    → T (oneRankLower sq₁ sq₂)
-    → IsDoubleStep b sq sq₁ sq₂
+-- yeah we ignore the second argument. it's there because it makes
+-- use of squareInBetween more readable
+squareInBetween : BoardArrangement → Square → Square → Square
+squareInBetween b (c , d) _ =
+  case whosTurn b of
+  λ{ white → (c , ℕtoRank ((rankToℕ d) + 1))
+   ; black → (c , ℕtoRank ((rankToℕ d) ∸ 1))
+   }
 
 -- | kings and their being in check
 
@@ -898,6 +906,7 @@ data Move : Set where
   0-0 : Move
   ep : WhichPawn → Square → Move
   p= : WhichPawn → Piece → Move
+  ds : WhichPawn → Move
   K : Square → Move
   Q : Square → Move
   B : Which → Square → Move
@@ -1091,15 +1100,15 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → ¬ Check b₁
     → IsMove m b b₁
 
-  doubleStep : ∀{b₁ sq m sq₁ sq₂ whichp}
-    → (P whichp sq₁) ≡ m
+  doubleStep : ∀{b₁ sq m sq₁ whichp}
+    → (ds whichp) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
-    → OccupiedWith b (pawn whichp) sq
     → ¬ T (pawnMoved b whichp)
-    → IsDoubleStep b sq sq₁ sq₂
+    → just sq ≡ sqOfPiece b (pawn whichp)
+    → sq₁ ≡ twoSteps b sq
     → ¬ Occupied b sq₁
-    → ¬ Occupied b sq₂
+    → ¬ Occupied b (squareInBetween b sq sq₁)
     → b₁ ≡ movePawn b whichp sq₁
     → ¬ Check b₁
     → IsMove m b b₁
@@ -1218,7 +1227,7 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
   -- need
 
 data Game : List Move → BoardArrangement → Set where
-  gameEnd : ∀{b} → Game [] b
+  endGame : ∀{b} → Game [] b
   game : ∀{m ms b b₁} → IsMove m b b₁ → Game ms b₁ → Game (m ∷ ms) b
 
 initialBoard : BoardArrangement
@@ -1314,8 +1323,8 @@ notCheckInitialBoard (check (occWith refl) (canAttackPawn {p7} (occWithOpponentP
 notCheckInitialBoard (check (occWith refl) (canAttackPawn {p8} (occWithOpponentPiece refl) x₁)) = x₁
 
 cb : Game [] initialBoard
-cb = gameEnd
-
+cb = endGame
+ 
 -- we have to go through 16*2 pieces
 notOccD3 : ¬ Occupied initialBoard (D , #3)
 notOccD3 (occupied (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next ())))))))))))))))))))))))))))))))))
@@ -1344,12 +1353,35 @@ ca : Game (P p4 (D , #3)
           ∷ [])
           initialBoard
 ca = game (mvPawn refl initialBoard notCheckInitialBoard (occWith refl) (isNotPromotedW refl (Any.there
-                                                                                                  (Any.there (Any.there (Any.here (isNotProm refl refl)))))) tt notOccD3 refl notCheckMoveP4) gameEnd
+                                                                                                  (Any.there (Any.there (Any.here (isNotProm refl refl)))))) tt notOccD3 refl notCheckMoveP4) endGame
 
-board2 = movePawn initialBoard p3 (C , #4)
+board2 = movePawn initialBoard p4 (D , #3)
+board3 = movePawn board2 p3 (C , #5)
+
+notCheckBoard2 : ¬ Check board2
+notCheckBoard2 = {!!}
+
+notCheckBoard3 : ¬ Check board3
+notCheckBoard3 = {!!}
+
+notOccC3 : ¬ Occupied board2 (C , #5)
+notOccC3 = {!!}
+
+notPawnP3Moved : ¬ T (pawnMoved board2 p3)
+notPawnP3Moved = {!!}
+
+notOccC7 : ¬ Occupied board2 (twoSteps board2 (C , #7))
+notOccC7 = {!!}
+
+notOccC6 : ¬ Occupied board2
+               (squareInBetween board2 (C , #7) (twoSteps board2 (C , #7)))
+notOccC6 = {!!}                 
+
 
 cc : Game ( P p4 (D , #3)
-          ∷ P p3 (C , #5)
+          ∷ ds p3 
           ∷ [])
           initialBoard
-cc = game {!!} (game {!!} gameEnd)
+cc = game (mvPawn refl initialBoard notCheckInitialBoard (occWith refl) (isNotPromotedW refl
+                                                                           (Any.there
+                                                                            (Any.there (Any.there (Any.here (isNotProm refl refl)))))) tt notOccD3 refl notCheckMoveP4) (game (doubleStep refl board2 notCheckBoard2 notPawnP3Moved refl refl notOccC7 notOccC6 refl notCheckBoard3) endGame)
