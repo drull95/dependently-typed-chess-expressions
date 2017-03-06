@@ -106,6 +106,9 @@ rankEq #7 #7 = true
 rankEq #8 #8 = true
 rankEq _  _  = false
 
+rankIs : Rank → Square → Bool
+rankIs r (a , b) = rankEq r b
+
 sqEq : Maybe Square → Square → Bool
 sqEq (just (a , b)) (c , d) = fileEq a c ∧ rankEq b d
 sqEq _ _ = false
@@ -521,11 +524,11 @@ removePiece b p =
       bps = pieces (blackSide b)
   in case whosTurn b of
      λ{ white → record b {
-          whiteSide =
-            updateSide (whiteSide b) (updatePiece wps p nothing)}
-      ; black → record b {
           blackSide =
             updateSide (blackSide b) (updatePiece bps p nothing)}
+      ; black → record b {
+          whiteSide =
+            updateSide (whiteSide b) (updatePiece wps p nothing)}
       }
 
 -- | helper for whoHasSquare
@@ -647,6 +650,14 @@ capturePawn : BoardArrangement → WhichPawn → Square → BoardArrangement
 capturePawn b wp s =
   markPawnMoved wp (capturePiece b (pawn wp) s)
 
+doEnPassant : BoardArrangement → WhichPawn → Square → Square → BoardArrangement
+doEnPassant b wp sq sq₁ = 
+  let b' = mvPiece b (pawn wp) sq
+  in case whoHasSquare b sq₁ of -- cheating
+     λ{ (just (pawn p)) → removePiece b' (pawn p)
+      ; _ → b'
+      }
+
 markKingMoved : BoardArrangement → BoardArrangement 
 markKingMoved b =
   let ws = whiteSide b
@@ -721,14 +732,6 @@ isCaptureMove b s sq =
    ; black → southeast s sq ∨ southwest s sq
    }
 
-isEnPassantMove : BoardArrangement → Square → Square → Square → Bool
-isEnPassantMove b s sq =
-  case whosTurn b of
-  λ{ white → (twoRanksHigher s sq ∧ oneFileLower s sq) ∨
-             (twoRanksHigher s sq ∧ oneFileHigher s sq) 
-   ; black → (twoRanksLower s sq ∧ oneFileLower s sq) ∨
-             (twoRanksLower s sq ∧ oneFileHigher s sq)
-   }
 
 -- | the occupation of little bits of land
 
@@ -790,6 +793,22 @@ data NotOccupiedLCastle : BoardArrangement → Set where
     → ¬ Occupied b (C , #8)
     → ¬ Occupied b (D , #8)
     → NotOccupiedLCastle b
+
+-- sq is start, sq₁ is dest, sq₂ is opponent pawn
+data IsEnPassantMove : BoardArrangement → Square → Square → Square → Set where
+  isEnPassantMoveW : ∀{whichp b sq sq₁ sq₂}
+    → T (rankEq #5 (proj₂ sq))
+    → OccupiedWithOpponentPiece b (pawn whichp) sq₂
+    → T (fileEq (proj₁ sq₁) (proj₁ sq₂))
+    → T (oneRankHigher sq₁ sq₂)
+    → IsEnPassantMove b sq sq₁ sq₂
+
+  isEnPassantMoveB : ∀{whichp b sq sq₁ sq₂}
+    → T (rankEq #4 (proj₂ sq))
+    → OccupiedWithOpponentPiece b (pawn whichp) sq₂
+    → T (fileEq (proj₁ sq₁) (proj₁ sq₂))
+    → T (oneRankLower sq₁ sq₂)
+    → IsEnPassantMove b sq sq₁ sq₂
 
 -- | kings and their being in check
 
@@ -878,6 +897,10 @@ data Move : Set where
 -- | The Moves
 
 -- the second board is the result of the move on the first board 
+-- or at least that was the intention
+-- according to the Game type b is the next board and b₁ is the
+-- old board. I don't understand why the Game type doesn't behave
+-- intuitively
 data IsMove : Move → BoardArrangement → BoardArrangement → Set where
   mvKing : ∀{m b₁ sq sq₁}
     → (K sq₁) ≡ m
@@ -1067,15 +1090,14 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
     → ¬ Check b₁
     → IsMove m b b₁
 
-  enPassant : ∀{b₁ sq m sq₁ sq₂ whichp whichp₁}
+  enPassant : ∀{b₁ sq m sq₁ sq₂ whichp}
     → (ep whichp sq₁) ≡ m
     → (b : BoardArrangement)
     → ¬ Check b
     → ¬ T (pawnMoved b whichp)
     → OccupiedWith b (pawn whichp) sq
-    → T (isEnPassantMove b sq sq₁ sq₂)
-    → OccupiedWithOpponentPiece b (pawn whichp₁) sq₂
-    → b₁ ≡ capturePawn b whichp sq₁
+    → IsEnPassantMove b sq sq₁ sq₂
+    → b₁ ≡ doEnPassant b whichp sq₁ sq₂
     → ¬ Check b₁
     → IsMove m b b₁
 
@@ -1170,8 +1192,8 @@ data IsMove : Move → BoardArrangement → BoardArrangement → Set where
   -- need
 
 data Game : List Move → BoardArrangement → Set where
-  gameBegin : ∀{b} → Game [] b
-  game : ∀{m ms b b₁} → IsMove m b b₁ → Game ms b → Game (m ∷ ms) b₁
+  gameEnd : ∀{b} → Game [] b
+  game : ∀{m ms b b₁} → IsMove m b₁ b → Game ms b₁ → Game (m ∷ ms) b
 
 initialBoard : BoardArrangement
 initialBoard =
@@ -1266,17 +1288,34 @@ notCheckInitialBoard (check (occWith refl) (canAttackPawn {p7} (occWithOpponentP
 notCheckInitialBoard (check (occWith refl) (canAttackPawn {p8} (occWithOpponentPiece refl) x₁)) = x₁
 
 cb : Game [] initialBoard
-cb = gameBegin
+cb = gameEnd
 
 -- we have to go through 16*2 pieces
 notOccD3 : ¬ Occupied initialBoard (D , #3)
 notOccD3 (occupied (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next (next ())))))))))))))))))))))))))))))))))
 
+-- same as notCheckInitialBoard
 notCheckMoveP4 : ¬ Check (movePawn initialBoard p4 (D , #3))
-notCheckMoveP4 = {!!}
+notCheckMoveP4 (check (occWith refl) (canAttackKing (occWithOpponentPiece refl) ()))
+notCheckMoveP4 (check (occWith refl) (canAttackQueenStraight (occWithOpponentPiece refl) p x₁)) = p
+notCheckMoveP4 (check (occWith refl) (canAttackQueenDiagonal (occWithOpponentPiece refl) p x₁)) = p
+notCheckMoveP4 (check (occWith refl) (canAttackBishop {k} (occWithOpponentPiece refl) p x₁)) = p
+notCheckMoveP4 (check (occWith refl) (canAttackBishop {q} (occWithOpponentPiece refl) p x₁)) = p
+notCheckMoveP4 (check (occWith refl) (canAttackKnight {k} (occWithOpponentPiece refl) ()))
+notCheckMoveP4 (check (occWith refl) (canAttackKnight {q} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckMoveP4 (check (occWith refl) (canAttackRook {k} (occWithOpponentPiece refl) p (notOccStep x x₁))) = p
+notCheckMoveP4 (check (occWith refl) (canAttackRook {q} (occWithOpponentPiece refl) p x₁)) = p
+notCheckMoveP4 (check (occWith refl) (canAttackPawn {p1} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckMoveP4 (check (occWith refl) (canAttackPawn {p2} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckMoveP4 (check (occWith refl) (canAttackPawn {p3} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckMoveP4 (check (occWith refl) (canAttackPawn {p4} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckMoveP4 (check (occWith refl) (canAttackPawn {p5} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckMoveP4 (check (occWith refl) (canAttackPawn {p6} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckMoveP4 (check (occWith refl) (canAttackPawn {p7} (occWithOpponentPiece refl) x₁)) = x₁
+notCheckMoveP4 (check (occWith refl) (canAttackPawn {p8} (occWithOpponentPiece refl) x₁)) = x₁
 
 ca : Game (P p4 (D , #3)
           ∷ [])
           initialBoard
 ca = game (mvPawn refl initialBoard (notCheckInitialBoard) (occWith refl) (isNotPromotedW refl (Any.there
-                                                                                                  (Any.there (Any.there (Any.here (isNotProm refl refl)))))) tt notOccD3 refl notCheckMoveP4) gameBegin
+                                                                                                  (Any.there (Any.there (Any.here (isNotProm refl refl)))))) tt notOccD3 refl notCheckMoveP4) gameEnd
